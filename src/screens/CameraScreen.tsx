@@ -1,19 +1,10 @@
 /**
- * CameraScreen - PREVIOUS IMPLEMENTATION (commented out)
+ * CameraScreen - Vision Camera + Frame Processor
  *
- * This file previously used:
  * - react-native-vision-camera for live camera preview
  * - useImageQualityFrameProcessor for real-time sharpness/brightness checks (on-device, no API)
- *
- * REPLACED BY: ImageQualityAnalyzerScreen
- * - Uses expo-image-picker for capture/select
- * - Sends to backend API (POST /api/analyze) for post-capture analysis
- * - Displays sharpness, brightness, contrast, noise in test UI
- *
- * To restore the Vision Camera flow, swap the import in App.tsx back to CameraScreen.
  */
 
-/*
 import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -58,9 +49,242 @@ export default function CameraScreen() {
   const frameProcessor = useImageQualityFrameProcessor(onQualityUpdate);
   const cameraRef = useRef<Camera>(null);
 
-  // ... rest of component (permission UI, capture, preview, etc.)
-}
-*/
+  const takePhoto = useCallback(async () => {
+    if (!cameraRef.current || !device) {
+      return;
+    }
+    try {
+      setIsCapturing(true);
+      setError(null);
+      const photo = await cameraRef.current.takePhoto({
+        flash: 'off',
+        enableShutterSound: Platform.OS === 'android',
+      });
+      setCapturedPhoto(photo);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      Alert.alert('Capture Error', msg);
+    } finally {
+      setIsCapturing(false);
+    }
+  }, [device]);
 
-// Placeholder export - use ImageQualityAnalyzerScreen in App.tsx instead
-export { default } from './ImageQualityAnalyzerScreen';
+  const requestCameraPermission = useCallback(async () => {
+    const result = await requestPermission();
+    if (!result) {
+      Alert.alert(
+        'Camera Permission',
+        'Camera permission is required to use the app.'
+      );
+    }
+  }, [requestPermission]);
+
+  if (!hasPermission) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.permissionText}>Camera permission required</Text>
+        <Pressable style={styles.button} onPress={requestCameraPermission}>
+          <Text style={styles.buttonText}>Grant permission</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (!device) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.permissionText}>No camera device</Text>
+      </View>
+    );
+  }
+
+  if (capturedPhoto) {
+    return (
+      <View style={styles.container}>
+        <Image
+          source={{ uri: `file://${capturedPhoto.path}` }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
+        <View style={styles.overlay}>
+          <Pressable
+            style={styles.button}
+            onPress={() => {
+              setCapturedPhoto(null);
+            }}
+          >
+            <Text style={styles.buttonText}>Take another photo</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Camera
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        device={device}
+        format={format}
+        isActive={true}
+        photo={true}
+        frameProcessor={frameProcessor}
+      />
+      {/* Pre-capture quality overlay */}
+      {preCaptureQuality && (
+        <View style={styles.qualityOverlay}>
+          <Text style={styles.qualityText}>
+            Sharpness: {(preCaptureQuality.sharpness * 100).toFixed(0)}%
+          </Text>
+          <Text style={styles.qualityText}>
+            Brightness: {(preCaptureQuality.brightness * 100).toFixed(0)}%
+          </Text>
+          {preCaptureQuality.isBlurry && (
+            <Text style={[styles.qualityText, styles.warning]}>Image is blurry</Text>
+          )}
+          {preCaptureQuality.isTooDark && (
+            <Text style={[styles.qualityText, styles.warning]}>Image is too dark</Text>
+          )}
+          {preCaptureQuality.isValid && (
+            <Text style={[styles.qualityText, styles.ok]}>Ready to capture</Text>
+          )}
+        </View>
+      )}
+      {error && (
+        <View style={styles.errorOverlay}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+      <View style={styles.controls}>
+        <Pressable
+          style={[styles.captureButton, isCapturing && styles.captureButtonDisabled]}
+          onPress={takePhoto}
+          disabled={isCapturing}
+        >
+          {isCapturing ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <View style={styles.captureInner} />
+          )}
+        </Pressable>
+        <Pressable
+          style={styles.flipButton}
+          onPress={() => {
+            setFacing((f) => (f === 'back' ? 'front' : 'back'));
+          }}
+        >
+          <Text style={styles.flipButtonText}>Flip camera</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+    padding: 24,
+  },
+  permissionText: {
+    color: '#fff',
+    fontSize: 16,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  button: {
+    backgroundColor: '#3b82f6',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    padding: 24,
+  },
+  qualityOverlay: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  qualityText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  warning: {
+    color: '#fbbf24',
+  },
+  ok: {
+    color: '#22c55e',
+  },
+  errorOverlay: {
+    position: 'absolute',
+    bottom: 100,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(239,68,68,0.9)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  controls: {
+    position: 'absolute',
+    bottom: 48,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 24,
+  },
+  captureButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderWidth: 4,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  captureButtonDisabled: {
+    opacity: 0.6,
+  },
+  captureInner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#fff',
+  },
+  flipButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+  },
+  flipButtonText: {
+    color: '#fff',
+    fontSize: 14,
+  },
+});

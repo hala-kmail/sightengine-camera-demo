@@ -1,12 +1,11 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View } from 'react-native';
-// Replaced: CameraScreen (Vision Camera + Frame Processor) with post-capture backend analysis
-import ImageQualityAnalyzerScreen from './src/screens/ImageQualityAnalyzerScreen';
+import CameraScreen from './src/screens/CameraScreen';
 
 export default function App() {
   return (
     <View style={styles.container}>
-      <ImageQualityAnalyzerScreen />
+      <CameraScreen />
       <StatusBar style="light" />
     </View>
   );
