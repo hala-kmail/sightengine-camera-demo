@@ -17,32 +17,15 @@ import {
 } from 'react-native-vision-camera';
 import { useImageQualityFrameProcessor } from '../hooks/useImageQualityFrameProcessor';
 import type { PreCaptureQuality } from '../hooks/useImageQualityFrameProcessor';
-import { analyzeImageQuality } from '../services/sightengineService';
 import type { PhotoFile } from 'react-native-vision-camera';
-import type { ImageQualityAnalysis } from '../types';
 
 type CameraFacing = 'front' | 'back';
-
-function getClassificationColor(classification: ImageQualityAnalysis['classification']): string {
-  switch (classification) {
-    case 'High':
-      return '#22c55e';
-    case 'Medium':
-      return '#eab308';
-    case 'Low':
-      return '#ef4444';
-    default:
-      return '#6b7280';
-  }
-}
 
 export default function CameraScreen() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const [facing, setFacing] = useState<CameraFacing>('back');
   const [capturedPhoto, setCapturedPhoto] = useState<PhotoFile | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<ImageQualityAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preCaptureQuality, setPreCaptureQuality] = useState<PreCaptureQuality | null>(null);
 
@@ -93,7 +76,6 @@ export default function CameraScreen() {
       });
       if (photo) {
         setCapturedPhoto(photo);
-        setAnalysis(null);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to capture photo';
@@ -106,26 +88,7 @@ export default function CameraScreen() {
 
   const handleRetake = () => {
     setCapturedPhoto(null);
-    setAnalysis(null);
     setError(null);
-  };
-
-  const handleConfirm = async () => {
-    if (!capturedPhoto?.path) {
-      return;
-    }
-    setIsAnalyzing(true);
-    setError(null);
-    try {
-      const result = await analyzeImageQuality(`file://${capturedPhoto.path}`);
-      setAnalysis(result);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to analyze image';
-      setError(message);
-      Alert.alert('Analysis Error', message);
-    } finally {
-      setIsAnalyzing(false);
-    }
   };
 
   const handleSwitchCamera = () => {
@@ -156,36 +119,6 @@ export default function CameraScreen() {
           />
         </View>
 
-        {isAnalyzing && (
-          <View style={styles.overlay}>
-            <ActivityIndicator size="large" color="#fff" />
-            <Text style={styles.overlayText}>Analyzing image quality...</Text>
-          </View>
-        )}
-
-        {analysis && !isAnalyzing && (
-          <View
-            style={[
-              styles.resultsCard,
-              { borderColor: getClassificationColor(analysis.classification) },
-            ]}
-          >
-            <Text
-              style={[
-                styles.classificationText,
-                { color: getClassificationColor(analysis.classification) },
-              ]}
-            >
-              Quality: {analysis.classification}
-            </Text>
-            <Text style={styles.metricText}>Score: {(analysis.qualityScore * 100).toFixed(0)}%</Text>
-            <Text style={styles.metricText}>Sharpness: {(analysis.sharpness * 100).toFixed(0)}%</Text>
-            <Text style={styles.metricText}>Brightness: {(analysis.brightness * 100).toFixed(0)}%</Text>
-            {analysis.isBlurry && <Text style={styles.warningText}>Image is blurry</Text>}
-            {analysis.isTooDark && <Text style={styles.warningText}>Image is too dark</Text>}
-          </View>
-        )}
-
         {error && (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
@@ -193,27 +126,10 @@ export default function CameraScreen() {
         )}
 
         <View style={styles.actionsRow}>
-          <Pressable style={styles.actionButton} onPress={handleRetake} disabled={isAnalyzing}>
+          <Pressable style={styles.actionButton} onPress={handleRetake}>
             <Text style={styles.actionButtonText}>Retake</Text>
           </Pressable>
-          <Pressable
-            style={[styles.actionButton, styles.confirmButton]}
-            onPress={handleConfirm}
-            disabled={isAnalyzing}
-          >
-            <Text style={styles.actionButtonText}>
-              {analysis ? 'Analyze Again' : 'Analyze Quality'}
-            </Text>
-          </Pressable>
         </View>
-
-        {analysis?.classification === 'Low' && (
-          <Pressable style={styles.retakeSuggestion} onPress={handleRetake}>
-            <Text style={styles.retakeSuggestionText}>
-              Quality is low - consider retaking the photo
-            </Text>
-          </Pressable>
-        )}
       </View>
     );
   }
@@ -287,8 +203,6 @@ export default function CameraScreen() {
     </View>
   );
 }
-
-const cameraRef = { current: null as Camera | null };
 
 const styles = StyleSheet.create({
   container: {
@@ -395,40 +309,6 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
   },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  overlayText: {
-    color: '#fff',
-    fontSize: 16,
-    marginTop: 12,
-  },
-  resultsCard: {
-    margin: 16,
-    padding: 16,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    borderWidth: 2,
-  },
-  classificationText: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  metricText: {
-    color: '#e5e7eb',
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  warningText: {
-    color: '#f59e0b',
-    fontSize: 14,
-    marginTop: 8,
-    fontWeight: '500',
-  },
   actionsRow: {
     flexDirection: 'row',
     padding: 16,
@@ -442,21 +322,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
-  confirmButton: {
-    backgroundColor: '#3b82f6',
-  },
   actionButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-  },
-  retakeSuggestion: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  retakeSuggestionText: {
-    color: '#f59e0b',
-    fontSize: 14,
   },
   errorBanner: {
     backgroundColor: '#7f1d1d',
