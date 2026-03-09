@@ -16,7 +16,8 @@
       "bundleIdentifier": "com.hala.sightenginecamera",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "This app needs camera access to capture photos for image quality analysis."
+        "NSCameraUsageDescription": "This app needs camera access to capture photos for image quality analysis.",
+        "NSPhotoLibraryUsageDescription": "This app needs photo library access to select images for quality analysis."
       }
     },
     "android": {
@@ -33,7 +34,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.hala.sightenginecamera"
+      "package": "com.hala.sightenginecamera",
+      "usesCleartextTraffic": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
