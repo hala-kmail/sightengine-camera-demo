@@ -23,22 +23,24 @@ import {
   Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 // ---------------------------------------------------------------------------
-// API Configuration - Update for physical device testing
+// API Configuration
 // ---------------------------------------------------------------------------
-// Set to your machine's IP (e.g. 'http://192.168.1.100:3000') when testing on physical device.
-// Leave undefined to use defaults: localhost (iOS sim), 10.0.2.2 (Android emulator).
-const API_BASE_OVERRIDE: string | undefined = undefined;
-
+// If you see "Network request failed" on a physical device: the phone cannot
+// reach "localhost" (that's the phone itself). Set API_BASE_OVERRIDE below to
+// your computer's IP on the same Wi‑Fi (e.g. 'http://192.168.1.100:3000').
+// Production: use your backend URL (e.g. 'https://api.example.com').
+const API_BASE_OVERRIDE: string | undefined = 'https://b08c-62-16-73-106.ngrok-free.app';
 const getApiBaseUrl = () => {
   if (API_BASE_OVERRIDE) {
     return API_BASE_OVERRIDE;
   }
   if (__DEV__ && Platform.OS === 'android') {
-    return 'http://10.0.2.2:3000';
+    return 'https://b08c-62-16-73-106.ngrok-free.app';
   }
-  return 'http://localhost:3000';
+  return 'https://b08c-62-16-73-106.ngrok-free.app';
 };
 
 const API_ANALYZE_URL = `${getApiBaseUrl()}/api/analyze`;
@@ -57,24 +59,50 @@ interface AnalysisResult {
   sharpness: {
     score: number;
     laplacian_variance: number;
-    interpretation: string;
+    interpretation?: string;
   };
   brightness: {
     score: number;
     exposure_status: string;
-    interpretation: string;
+    interpretation?: string;
   };
   contrast: {
     score: number;
     std_deviation: number;
-    interpretation: string;
+    interpretation?: string;
   };
   noise: {
     score: number;
-    interpretation: string;
+    interpretation?: string;
   };
   evaluation?: Evaluation;
 }
+
+const RATING_COLORS: Record<string, string> = {
+  good: '#22c55e',
+  acceptable: '#eab308',
+  poor: '#ef4444',
+};
+
+const RATING_LABELS_EN: Record<string, string> = {
+  good: 'Good',
+  acceptable: 'Acceptable',
+  poor: 'Needs improvement',
+};
+
+const RATING_LABELS_AR: Record<string, string> = {
+  good: 'جودة جيدة',
+  acceptable: 'جودة مقبولة',
+  poor: 'الجودة تحتاج تحسين',
+};
+
+const ISSUE_LABELS_EN: Record<string, string> = {
+  blurry: 'Blurry',
+  too_dark: 'Too dark',
+  overexposed: 'Overexposed',
+  low_contrast: 'Low contrast',
+  noisy: 'Noisy',
+};
 
 const ISSUE_LABELS_AR: Record<string, string> = {
   blurry: 'الصورة غير واضحة (ضبابية)',
@@ -87,33 +115,69 @@ const ISSUE_LABELS_AR: Record<string, string> = {
 function getQualityDisplay(analysis: AnalysisResult): {
   rating: string;
   ratingColor: string;
-  message: string;
-  issues: string[];
+  messageEn: string;
+  messageAr: string | null;
+  issuesEn: string[];
+  issuesAr: string[];
 } {
   const ev = analysis.evaluation;
   if (ev) {
-    const ratingAr = { good: 'جودة جيدة', acceptable: 'جودة مقبولة', poor: 'الجودة تحتاج تحسين' };
-    const colors = { good: '#22c55e', acceptable: '#eab308', poor: '#ef4444' };
-    const issuesAr = (ev.issues || []).map((i) => ISSUE_LABELS_AR[i] || i);
+    const colors = RATING_COLORS;
+    const issues = ev.issues || [];
     return {
-      rating: ratingAr[ev.quality_rating] || ev.quality_rating,
+      rating: RATING_LABELS_EN[ev.quality_rating] || ev.quality_rating,
       ratingColor: colors[ev.quality_rating] || '#9ca3af',
-      message: ev.message_ar || ev.message_en,
-      issues: issuesAr,
+      messageEn: ev.message_en || ev.message_ar || 'No evaluation message.',
+      messageAr: ev.message_ar || null,
+      issuesEn: issues.map((i) => ISSUE_LABELS_EN[i] || i),
+      issuesAr: issues.map((i) => ISSUE_LABELS_AR[i] || i),
     };
   }
   return {
     rating: '—',
     ratingColor: '#9ca3af',
-    message: 'لا توجد رسالة تقييم من الخادم.',
-    issues: [],
+    messageEn: 'No evaluation from server.',
+    messageAr: null,
+    issuesEn: [],
+    issuesAr: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Connection test — quick GET to see if the phone can reach the server
+// ---------------------------------------------------------------------------
+async function testConnection(): Promise<{ ok: boolean; durationMs: number; error?: string }> {
+  const baseUrl = getApiBaseUrl();
+  const start = Date.now();
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 10000); // 10s max for test
+    const res = await fetch(baseUrl, { method: 'GET', signal: controller.signal });
+    const durationMs = Date.now() - start;
+    console.log('[ConnectionTest] GET', baseUrl, { status: res.status, durationMs });
+    return { ok: true, durationMs };
+  } catch (e) {
+    const durationMs = Date.now() - start;
+    const msg = e instanceof Error ? e.message : String(e);
+    const isAbort = msg === 'Aborted' || (e instanceof Error && e.name === 'AbortError');
+    const friendlyError = isAbort
+      ? `No response in ${durationMs / 1000}s (server unreachable from this device)`
+      : msg;
+    console.error('[ConnectionTest] FAILED', { baseUrl, durationMs, error: friendlyError });
+    return { ok: false, durationMs, error: friendlyError };
+  }
 }
 
 // ---------------------------------------------------------------------------
 // API: Send image to backend for analysis
 // ---------------------------------------------------------------------------
 async function analyzeImage(uri: string): Promise<AnalysisResult> {
+  const startTime = Date.now();
+  console.log('[Analyze] START', {
+    url: API_ANALYZE_URL,
+    imageUri: uri?.substring?.(0, 60) + (uri?.length > 60 ? '...' : ''),
+  });
+
   const formData = new FormData();
   formData.append('image', {
     uri,
@@ -121,18 +185,96 @@ async function analyzeImage(uri: string): Promise<AnalysisResult> {
     name: 'photo.jpg',
   } as unknown as Blob);
 
-  const response = await fetch(API_ANALYZE_URL, {
-    method: 'POST',
-    body: formData,
-    // Do NOT set Content-Type - fetch sets multipart/form-data with boundary
-  });
+  // Long timeout: upload + server analysis can take 2–3 minutes for large images
+  const REQUEST_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  const data = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || 'Analysis failed');
+  let response: Response;
+  try {
+    response = await fetch(API_ANALYZE_URL, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const fetchDuration = Date.now() - startTime;
+    console.log('[Analyze] FETCH done', {
+      status: response.status,
+      statusText: response.statusText,
+      durationMs: fetchDuration,
+      ok: response.ok,
+    });
+  } catch (networkErr) {
+    clearTimeout(timeoutId);
+    const durationMs = Date.now() - startTime;
+    const msg =
+      networkErr instanceof Error ? networkErr.message : 'Network error';
+    const isTimeout =
+      networkErr instanceof Error && networkErr.name === 'AbortError';
+    console.error('[Analyze] NETWORK ERROR', {
+      durationMs,
+      message: msg,
+      isTimeout,
+      error: networkErr,
+    });
+    throw new Error(
+      isTimeout
+        ? `Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s. The server may be slow or the image too large. Try a smaller image.`
+        : `Cannot reach server (${msg}). Is the backend running at ${API_ANALYZE_URL}? On a physical device, set API_BASE_OVERRIDE in this file.`
+    );
   }
 
+  let rawText: string;
+  try {
+    rawText = await response.text();
+  } catch (e) {
+    console.error('[Analyze] Failed to read response body', e);
+    throw new Error('Failed to read response from server.');
+  }
+
+  let data: { success?: boolean; error?: string; analysis?: AnalysisResult; filename?: string };
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    console.error('[Analyze] Response is not JSON', {
+      status: response.status,
+      bodyPreview: rawText?.substring(0, 200),
+    });
+    throw new Error(
+      response.ok
+        ? 'Invalid response from server (not JSON).'
+        : `Server error ${response.status}: ${rawText || response.statusText}`
+    );
+  }
+
+  const totalDuration = Date.now() - startTime;
+  console.log('[Analyze] RESPONSE', {
+    success: data.success,
+    filename: data.filename,
+    error: data.error,
+    hasAnalysis: !!data.analysis,
+    totalDurationMs: totalDuration,
+    fullResponse: data,
+  });
+
+  if (!response.ok) {
+    console.error('[Analyze] HTTP error', response.status, data?.error);
+    throw new Error(
+      data?.error || `Server error ${response.status}: ${response.statusText}`
+    );
+  }
+
+  if (!data.success || !data.analysis) {
+    console.error('[Analyze] API returned failure', data?.error);
+    throw new Error(data?.error || 'Analysis failed');
+  }
+
+  console.log('[Analyze] SUCCESS', {
+    quality_rating: data.analysis?.evaluation?.quality_rating,
+    message_en: data.analysis?.evaluation?.message_en,
+    issues: data.analysis?.evaluation?.issues,
+  });
   return data.analysis;
 }
 
@@ -193,20 +335,42 @@ export default function ImageQualityAnalyzerScreen() {
   }, []);
 
   const processImage = async (uri: string) => {
+    console.log('[ProcessImage] START', { uri: uri?.substring?.(0, 80) });
     setImageUri(uri);
     setAnalysis(null);
     setError(null);
     setIsLoading(true);
 
     try {
-      const result = await analyzeImage(uri);
+      // Resize & compress before upload — mobile camera images are huge (4–12 MB),
+      // causing timeout. Web uses smaller images. 1280px + 0.8 compress = fast upload.
+      const manipulated = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1280 } }],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      console.log('[ProcessImage] Resized for upload', {
+        original: uri?.substring?.(0, 50),
+        newUri: manipulated.uri?.substring?.(0, 50),
+      });
+      // Quick connection test — if GET fails, phone likely can't reach server (firewall, AP isolation)
+      const conn = await testConnection();
+      if (!conn.ok) {
+        throw new Error(
+          `Cannot reach server: ${conn.error}. Fix: Run "ngrok http 3000" on your PC, then set API_BASE_OVERRIDE to the ngrok URL (e.g. https://xxxx.ngrok-free.app).`
+        );
+      }
+      const result = await analyzeImage(manipulated.uri);
+      console.log('[ProcessImage] SUCCESS', { hasResult: !!result });
       setAnalysis(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[ProcessImage] ERROR', { message, err });
       setError(message);
       Alert.alert('Analysis Error', message);
     } finally {
       setIsLoading(false);
+      console.log('[ProcessImage] DONE (loading off)');
     }
   };
 
@@ -243,19 +407,22 @@ export default function ImageQualityAnalyzerScreen() {
           </View>
         )}
 
-        {/* Quality assessment message + issues (from backend) */}
+        {/* Quality assessment: primary English message + optional Arabic */}
         {analysis && (() => {
-          const { rating, ratingColor, message, issues } = getQualityDisplay(analysis);
+          const { rating, ratingColor, messageEn, messageAr, issuesEn } = getQualityDisplay(analysis);
           return (
             <View style={[styles.assessmentCard, { borderColor: ratingColor }]}>
-              <Text style={styles.assessmentLabel}>تقييم الجودة</Text>
+              <Text style={styles.assessmentLabel}>Quality</Text>
               <Text style={[styles.assessmentRating, { color: ratingColor }]}>{rating}</Text>
-              <Text style={styles.assessmentMessage}>{message}</Text>
-              {issues.length > 0 ? (
+              <Text style={styles.assessmentMessage}>{messageEn}</Text>
+              {messageAr ? (
+                <Text style={styles.assessmentMessageAr}>{messageAr}</Text>
+              ) : null}
+              {issuesEn.length > 0 ? (
                 <>
-                  <Text style={styles.assessmentIssuesLabel}>ما يحتاج تحسين:</Text>
+                  <Text style={styles.assessmentIssuesLabel}>Issues:</Text>
                   <View style={styles.issuesList}>
-                    {issues.map((issue, i) => (
+                    {issuesEn.map((issue, i) => (
                       <Text key={i} style={styles.issueItem}>
                         • {issue}
                       </Text>
@@ -385,6 +552,12 @@ const styles = StyleSheet.create({
   },
   assessmentMessage: {
     color: '#e5e7eb',
+    fontSize: 16,
+    marginBottom: 8,
+    lineHeight: 22,
+  },
+  assessmentMessageAr: {
+    color: '#9ca3af',
     fontSize: 14,
     marginBottom: 12,
     textAlign: 'right',
