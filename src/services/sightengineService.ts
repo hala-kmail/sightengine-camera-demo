@@ -1,6 +1,10 @@
 import { env } from '../../config/env';
 import type { ImageQualityAnalysis, QualityClassification, SightengineQualityResponse } from '../types';
 
+/**
+ * Sightengine API - POST-CAPTURE analysis only.
+ * Pre-capture validation is handled by Vision Camera Frame Processors (blur/brightness).
+ */
 const SIGHTENGINE_API_URL = 'https://api.sightengine.com/1.0/check.json';
 
 function getClassification(qualityScore: number): QualityClassification {
@@ -55,7 +59,11 @@ export async function analyzeImageQuality(uri: string): Promise<ImageQualityAnal
   if ('blob' in media) {
     formData.append('media', media.blob, media.filename);
   } else {
-    formData.append('media', media as unknown as Blob);
+    formData.append('media', {
+      uri: media.uri,
+      type: media.type,
+      name: media.name,
+    } as unknown as Blob);
   }
   formData.append('models', 'quality,properties');
   formData.append('api_user', apiUser);

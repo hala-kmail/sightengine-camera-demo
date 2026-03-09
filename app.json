@@ -15,7 +15,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.hala.sightenginecamera",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "This app needs camera access to capture photos for image quality analysis."
       }
     },
     "android": {
@@ -28,17 +29,20 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
-      ]
+      ],
+      "package": "com.hala.sightenginecamera"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
-        "expo-camera",
+        "react-native-vision-camera",
         {
-          "cameraPermission": "This app needs camera access to capture photos for image quality analysis."
+          "cameraPermissionText": "This app needs camera access to capture photos for image quality analysis."
         }
       ]
     ],

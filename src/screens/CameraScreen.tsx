@@ -1,5 +1,4 @@
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,8 +9,16 @@ import {
   Text,
   View,
 } from 'react-native';
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  useCameraFormat,
+} from 'react-native-vision-camera';
+import { useImageQualityFrameProcessor } from '../hooks/useImageQualityFrameProcessor';
+import type { PreCaptureQuality } from '../hooks/useImageQualityFrameProcessor';
 import { analyzeImageQuality } from '../services/sightengineService';
-import type { CameraCapturedPicture } from 'expo-camera';
+import type { PhotoFile } from 'react-native-vision-camera';
 import type { ImageQualityAnalysis } from '../types';
 
 type CameraFacing = 'front' | 'back';
@@ -30,24 +37,29 @@ function getClassificationColor(classification: ImageQualityAnalysis['classifica
 }
 
 export default function CameraScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
+  const { hasPermission, requestPermission } = useCameraPermission();
   const [facing, setFacing] = useState<CameraFacing>('back');
-  const [capturedPhoto, setCapturedPhoto] = useState<CameraCapturedPicture | null>(null);
+  const [capturedPhoto, setCapturedPhoto] = useState<PhotoFile | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<ImageQualityAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const cameraRef = useRef<CameraView>(null);
+  const [preCaptureQuality, setPreCaptureQuality] = useState<PreCaptureQuality | null>(null);
 
-  if (!permission) {
-    return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.message}>Requesting camera permission...</Text>
-      </View>
-    );
-  }
+  const device = useCameraDevice(facing);
+  const format = useCameraFormat(device, [
+    { videoResolution: { width: 1280, height: 720 } },
+    { fps: 30 },
+  ]);
 
-  if (!permission.granted) {
+  const onQualityUpdate = useCallback((quality: PreCaptureQuality) => {
+    setPreCaptureQuality(quality);
+  }, []);
+
+  const frameProcessor = useImageQualityFrameProcessor(onQualityUpdate);
+  const cameraRef = useRef<Camera>(null);
+
+  if (!hasPermission) {
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.message}>Camera permission is required to capture photos.</Text>
@@ -58,16 +70,26 @@ export default function CameraScreen() {
     );
   }
 
+  if (device == null) {
+    return (
+      <View style={styles.centerContainer}>
+        <Text style={styles.message}>No camera device available</Text>
+      </View>
+    );
+  }
+
   const handleCapture = async () => {
-    if (!cameraRef.current || isCapturing) {
+    if (isCapturing) {
+      return;
+    }
+    if (preCaptureQuality && !preCaptureQuality.isValid) {
       return;
     }
     setIsCapturing(true);
     setError(null);
     try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.9,
-        base64: false,
+      const photo = await cameraRef.current?.takePhoto({
+        flash: 'off',
       });
       if (photo) {
         setCapturedPhoto(photo);
@@ -89,13 +111,13 @@ export default function CameraScreen() {
   };
 
   const handleConfirm = async () => {
-    if (!capturedPhoto?.uri) {
+    if (!capturedPhoto?.path) {
       return;
     }
     setIsAnalyzing(true);
     setError(null);
     try {
-      const result = await analyzeImageQuality(capturedPhoto.uri);
+      const result = await analyzeImageQuality(`file://${capturedPhoto.path}`);
       setAnalysis(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to analyze image';
@@ -110,7 +132,7 @@ export default function CameraScreen() {
     setFacing((prev) => (prev === 'back' ? 'front' : 'back'));
   };
 
-  const isCameraAvailable = Platform.OS === 'web' ? true : true;
+  const isCameraAvailable = Platform.OS !== 'web';
 
   if (!isCameraAvailable && Platform.OS === 'web') {
     return (
@@ -127,7 +149,11 @@ export default function CameraScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.previewContainer}>
-          <Image source={{ uri: capturedPhoto.uri }} style={styles.previewImage} resizeMode="contain" />
+          <Image
+            source={{ uri: `file://${capturedPhoto.path}` }}
+            style={styles.previewImage}
+            resizeMode="contain"
+          />
         </View>
 
         {isAnalyzing && (
@@ -138,8 +164,18 @@ export default function CameraScreen() {
         )}
 
         {analysis && !isAnalyzing && (
-          <View style={[styles.resultsCard, { borderColor: getClassificationColor(analysis.classification) }]}>
-            <Text style={[styles.classificationText, { color: getClassificationColor(analysis.classification) }]}>
+          <View
+            style={[
+              styles.resultsCard,
+              { borderColor: getClassificationColor(analysis.classification) },
+            ]}
+          >
+            <Text
+              style={[
+                styles.classificationText,
+                { color: getClassificationColor(analysis.classification) },
+              ]}
+            >
               Quality: {analysis.classification}
             </Text>
             <Text style={styles.metricText}>Score: {(analysis.qualityScore * 100).toFixed(0)}%</Text>
@@ -173,22 +209,58 @@ export default function CameraScreen() {
 
         {analysis?.classification === 'Low' && (
           <Pressable style={styles.retakeSuggestion} onPress={handleRetake}>
-            <Text style={styles.retakeSuggestionText}>Quality is low - consider retaking the photo</Text>
+            <Text style={styles.retakeSuggestionText}>
+              Quality is low - consider retaking the photo
+            </Text>
           </Pressable>
         )}
       </View>
     );
   }
 
+  const canCapture = preCaptureQuality?.isValid ?? true;
+  const warningMessages: string[] = [];
+  if (preCaptureQuality?.isBlurry) {
+    warningMessages.push('Image is too blurry');
+  }
+  if (preCaptureQuality?.isTooDark) {
+    warningMessages.push('Image is too dark');
+  }
+
   return (
     <View style={styles.container}>
-      <CameraView style={styles.camera} facing={facing} ref={cameraRef}>
-        <View style={styles.cameraOverlay}>
-          <Pressable style={styles.switchButton} onPress={handleSwitchCamera}>
-            <Text style={styles.switchButtonText}>Switch</Text>
-          </Pressable>
-        </View>
-      </CameraView>
+      <Camera
+        style={StyleSheet.absoluteFill}
+        device={device}
+        isActive={true}
+        format={format}
+        pixelFormat="rgb"
+        photo={true}
+        frameProcessor={frameProcessor}
+        ref={cameraRef}
+      />
+      <View style={styles.cameraOverlay}>
+        <Pressable style={styles.switchButton} onPress={handleSwitchCamera}>
+          <Text style={styles.switchButtonText}>Switch</Text>
+        </Pressable>
+      </View>
+
+      {/* مؤشر أن الفحص يعمل بمكتبة Vision Camera (بدون API) */}
+      <View style={styles.frameProcessorBadge}>
+        <Text style={styles.frameProcessorBadgeTitle}>Real-time check (Vision Camera)</Text>
+        {preCaptureQuality != null ? (
+          <>
+            <Text style={styles.frameProcessorBadgeStatus}>
+              {preCaptureQuality.isValid ? '✓ Ready to capture' : warningMessages.join(' • ')}
+            </Text>
+            <Text style={styles.frameProcessorBadgeValues}>
+              Sharpness: {(preCaptureQuality.sharpness * 100).toFixed(0)}% • Brightness: {(preCaptureQuality.brightness * 100).toFixed(0)}%
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.frameProcessorBadgeStatus}>Analyzing...</Text>
+        )}
+      </View>
 
       {error && (
         <View style={styles.errorBanner}>
@@ -198,9 +270,12 @@ export default function CameraScreen() {
 
       <View style={styles.captureRow}>
         <Pressable
-          style={[styles.captureButton, isCapturing && styles.captureButtonDisabled]}
+          style={[
+            styles.captureButton,
+            (isCapturing || !canCapture) && styles.captureButtonDisabled,
+          ]}
           onPress={handleCapture}
-          disabled={isCapturing}
+          disabled={isCapturing || !canCapture}
         >
           {isCapturing ? (
             <ActivityIndicator color="#fff" size="small" />
@@ -212,6 +287,8 @@ export default function CameraScreen() {
     </View>
   );
 }
+
+const cameraRef = { current: null as Camera | null };
 
 const styles = StyleSheet.create({
   container: {
@@ -242,11 +319,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  camera: {
-    flex: 1,
-  },
   cameraOverlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
     justifyContent: 'flex-end',
     alignItems: 'flex-end',
@@ -261,6 +335,31 @@ const styles = StyleSheet.create({
   switchButtonText: {
     color: '#fff',
     fontSize: 14,
+  },
+  frameProcessorBadge: {
+    position: 'absolute',
+    top: 46,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 10,
+    borderRadius: 8,
+  },
+  frameProcessorBadgeTitle: {
+    color: '#93c5fd',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  frameProcessorBadgeStatus: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  frameProcessorBadgeValues: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 4,
   },
   captureRow: {
     position: 'absolute',
