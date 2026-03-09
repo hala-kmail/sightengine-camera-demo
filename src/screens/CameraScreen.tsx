@@ -82,10 +82,10 @@ export default function CameraScreen() {
 
   if (!hasPermission) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.permissionText}>Camera permission required</Text>
+      <View style={styles.centerContainer}>
+        <Text style={styles.message}>Camera permission is required to capture photos.</Text>
         <Pressable style={styles.button} onPress={requestCameraPermission}>
-          <Text style={styles.buttonText}>Grant permission</Text>
+          <Text style={styles.buttonText}>Grant Permission</Text>
         </Pressable>
       </View>
     );
@@ -93,8 +93,8 @@ export default function CameraScreen() {
 
   if (!device) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.permissionText}>No camera device</Text>
+      <View style={styles.centerContainer}>
+        <Text style={styles.message}>No camera device available</Text>
       </View>
     );
   }
@@ -102,11 +102,13 @@ export default function CameraScreen() {
   if (capturedPhoto) {
     return (
       <View style={styles.container}>
-        <Image
-          source={{ uri: `file://${capturedPhoto.path}` }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-        />
+        <View style={styles.previewContainer}>
+          <Image
+            source={{ uri: `file://${capturedPhoto.path}` }}
+            style={styles.previewImage}
+            resizeMode="contain"
+          />
+        </View>
         <View style={styles.overlay}>
           <Pressable
             style={styles.button}
@@ -121,6 +123,15 @@ export default function CameraScreen() {
     );
   }
 
+  const warningMessages: string[] = [];
+  if (preCaptureQuality?.isBlurry) {
+    warningMessages.push('Image is too blurry');
+  }
+  if (preCaptureQuality?.isTooDark) {
+    warningMessages.push('Image is too dark');
+  }
+  const canCapture = preCaptureQuality?.isValid ?? true;
+
   return (
     <View style={styles.container}>
       <Camera
@@ -132,50 +143,53 @@ export default function CameraScreen() {
         photo={true}
         frameProcessor={frameProcessor}
       />
-      {/* Pre-capture quality overlay */}
-      {preCaptureQuality && (
-        <View style={styles.qualityOverlay}>
-          <Text style={styles.qualityText}>
-            Sharpness: {(preCaptureQuality.sharpness * 100).toFixed(0)}%
-          </Text>
-          <Text style={styles.qualityText}>
-            Brightness: {(preCaptureQuality.brightness * 100).toFixed(0)}%
-          </Text>
-          {preCaptureQuality.isBlurry && (
-            <Text style={[styles.qualityText, styles.warning]}>Image is blurry</Text>
-          )}
-          {preCaptureQuality.isTooDark && (
-            <Text style={[styles.qualityText, styles.warning]}>Image is too dark</Text>
-          )}
-          {preCaptureQuality.isValid && (
-            <Text style={[styles.qualityText, styles.ok]}>Ready to capture</Text>
-          )}
-        </View>
-      )}
-      {error && (
-        <View style={styles.errorOverlay}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-      <View style={styles.controls}>
+      <View style={styles.cameraOverlay}>
         <Pressable
-          style={[styles.captureButton, isCapturing && styles.captureButtonDisabled]}
-          onPress={takePhoto}
-          disabled={isCapturing}
-        >
-          {isCapturing ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <View style={styles.captureInner} />
-          )}
-        </Pressable>
-        <Pressable
-          style={styles.flipButton}
+          style={styles.switchButton}
           onPress={() => {
             setFacing((f) => (f === 'back' ? 'front' : 'back'));
           }}
         >
-          <Text style={styles.flipButtonText}>Flip camera</Text>
+          <Text style={styles.switchButtonText}>Switch</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.frameProcessorBadge}>
+        <Text style={styles.frameProcessorBadgeTitle}>Real-time check (Vision Camera)</Text>
+        {preCaptureQuality != null ? (
+          <>
+            <Text style={styles.frameProcessorBadgeStatus}>
+              {preCaptureQuality.isValid ? '✓ Ready to capture' : warningMessages.join(' • ')}
+            </Text>
+            <Text style={styles.frameProcessorBadgeValues}>
+              Sharpness: {(preCaptureQuality.sharpness * 100).toFixed(0)}% • Brightness: {(preCaptureQuality.brightness * 100).toFixed(0)}%
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.frameProcessorBadgeStatus}>Analyzing...</Text>
+        )}
+      </View>
+
+      {error && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
+      <View style={styles.captureRow}>
+        <Pressable
+          style={[
+            styles.captureButton,
+            (isCapturing || !canCapture) && styles.captureButtonDisabled,
+          ]}
+          onPress={takePhoto}
+          disabled={isCapturing || !canCapture}
+        >
+          {isCapturing ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <View style={styles.captureButtonInner} />
+          )}
         </Pressable>
       </View>
     </View>
@@ -187,18 +201,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  center: {
+  centerContainer: {
     flex: 1,
+    backgroundColor: '#1a1a1a',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
     padding: 24,
   },
-  permissionText: {
+  message: {
     color: '#fff',
     fontSize: 16,
-    marginBottom: 16,
     textAlign: 'center',
+    marginBottom: 24,
   },
   button: {
     backgroundColor: '#3b82f6',
@@ -209,82 +223,101 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
   },
-  overlay: {
+  cameraOverlay: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
     justifyContent: 'flex-end',
-    padding: 24,
+    alignItems: 'flex-end',
+    padding: 20,
   },
-  qualityOverlay: {
-    position: 'absolute',
-    top: 60,
-    left: 16,
-    right: 16,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    padding: 12,
+  switchButton: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
   },
-  qualityText: {
+  switchButtonText: {
     color: '#fff',
     fontSize: 14,
   },
-  warning: {
-    color: '#fbbf24',
-  },
-  ok: {
-    color: '#22c55e',
-  },
-  errorOverlay: {
+  frameProcessorBadge: {
     position: 'absolute',
-    bottom: 100,
+    top: 46,
     left: 16,
     right: 16,
-    backgroundColor: 'rgba(239,68,68,0.9)',
-    padding: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 10,
     borderRadius: 8,
   },
-  errorText: {
+  frameProcessorBadgeTitle: {
+    color: '#93c5fd',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  frameProcessorBadgeStatus: {
     color: '#fff',
     fontSize: 14,
-    textAlign: 'center',
+    fontWeight: '500',
   },
-  controls: {
+  frameProcessorBadgeValues: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  captureRow: {
     position: 'absolute',
-    bottom: 48,
+    bottom: 40,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: 24,
   },
   captureButton: {
     width: 72,
     height: 72,
     borderRadius: 36,
     backgroundColor: 'rgba(255,255,255,0.3)',
-    borderWidth: 4,
-    borderColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#fff',
   },
   captureButtonDisabled: {
     opacity: 0.6,
   },
-  captureInner: {
+  captureButtonInner: {
     width: 56,
     height: 56,
     borderRadius: 28,
     backgroundColor: '#fff',
   },
-  flipButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+  previewContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  previewImage: {
+    flex: 1,
+    width: '100%',
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+    justifyContent: 'flex-end',
+    padding: 24,
+  },
+  errorBanner: {
+    position: 'absolute',
+    bottom: 120,
+    left: 16,
+    right: 16,
+    backgroundColor: '#7f1d1d',
+    padding: 12,
     borderRadius: 8,
   },
-  flipButtonText: {
-    color: '#fff',
+  errorText: {
+    color: '#fca5a5',
     fontSize: 14,
   },
 });
