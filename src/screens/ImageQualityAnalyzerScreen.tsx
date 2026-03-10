@@ -32,15 +32,15 @@ import * as ImageManipulator from 'expo-image-manipulator';
 // reach "localhost" (that's the phone itself). Set API_BASE_OVERRIDE below to
 // your computer's IP on the same Wi‑Fi (e.g. 'http://192.168.1.100:3000').
 // Production: use your backend URL (e.g. 'https://api.example.com').
-const API_BASE_OVERRIDE: string | undefined = 'https://b08c-62-16-73-106.ngrok-free.app';
+const API_BASE_OVERRIDE: string | undefined = 'https://cebd-46-60-54-197.ngrok-free.app';
 const getApiBaseUrl = () => {
   if (API_BASE_OVERRIDE) {
     return API_BASE_OVERRIDE;
   }
   if (__DEV__ && Platform.OS === 'android') {
-    return 'https://b08c-62-16-73-106.ngrok-free.app';
+    return 'https://cebd-46-60-54-197.ngrok-free.app';
   }
-  return 'https://b08c-62-16-73-106.ngrok-free.app';
+  return 'https://cebd-46-60-54-197.ngrok-free.app';
 };
 
 const API_ANALYZE_URL = `${getApiBaseUrl()}/api/analyze`;
